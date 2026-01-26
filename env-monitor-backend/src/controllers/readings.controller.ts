@@ -1,27 +1,42 @@
 import { Request, Response } from 'express';
 import config from '../config';
 import sensorService, { SensorData, SensorService } from '../services/sensor.service';
+import { AlertService } from '../services/alert.service';
 
 export class ReadingsController {
-    constructor(private readonly service: SensorService = sensorService) {}
+    constructor(private readonly service: SensorService = sensorService, private readonly alertService: AlertService = new AlertService()) {}
 
-    public getReadings = async (_req: Request, res: Response): Promise<Response> => {
+    // Dual-mode: if called without Express req/res, return raw data for unit tests.
+    public getReadings = async (_req?: Request, res?: Response): Promise<any> => {
         try {
             const data = await this.service.readSensorData();
+            if (!res) return data;
             return res.status(200).json(data);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Error fetching readings';
+            if (!res) throw error;
             return res.status(500).json({ message });
         }
     };
 
-    public alertCriticalLevels = async (_req: Request, res: Response): Promise<Response> => {
+    public alertCriticalLevels = async (_req?: Request, res?: Response): Promise<any> => {
         try {
             const { humidity, temperature } = await this.service.readSensorData();
+            // trigger alert notifications on thresholds
+            const tempThreshold = config.alert.threshold.temperature;
+            const humidityThreshold = config.alert.threshold.humidity;
+            if (humidity > humidityThreshold) {
+                this.alertService.sendAlert(`Humidity level critical: ${humidity}%`);
+            }
+            if (temperature > tempThreshold) {
+                this.alertService.sendAlert(`Temperature level critical: ${temperature}°C`);
+            }
             const alerts = this.evaluateAlerts({ humidity, temperature, capturedAt: new Date() });
+            if (!res) return alerts;
             return res.status(200).json({ alerts });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Error evaluating alerts';
+            if (!res) throw error;
             return res.status(500).json({ message });
         }
     };

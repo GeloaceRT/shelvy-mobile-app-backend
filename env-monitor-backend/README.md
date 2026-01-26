@@ -1,75 +1,61 @@
 # Environmental Monitoring Backend
 
-This project is a backend application designed to monitor humidity and temperature levels using an SHT30 sensor connected to a Raspberry Pi 5. It supports both mobile and web applications, providing users with real-time data and alerts for critical parameters.
+This backend collects sensor readings (humidity and temperature), stores them in Firebase Realtime Database, and provides authentication and alerting services for mobile/web clients.
 
-## Features
+**Quick Start**
+- Install dependencies: `npm install`
+- Create a `.env` file (see **Environment** below)
+- Run locally: `npm start` (defaults to `http://localhost:4000` unless `PORT` is changed)
 
-- **User Authentication**: Users can log in and log out securely.
-- **Sensor Data Monitoring**: Fetches and displays humidity and temperature readings from the SHT30 sensor.
-- **Alerts**: Notifies users when humidity or temperature levels exceed critical thresholds.
+**Tests**
+- Run unit tests: `npm test`
 
-## Project Structure
+**Environment**
+Provide these minimum variables in `.env`:
+- `FIREBASE_PROJECT_ID` — Firebase project id
+- `FIREBASE_DATABASE_URL` — Realtime Database URL
+- `FIREBASE_API_KEY` — Firebase Web API key (used for token exchange)
+- `DEVICE_ID` — prototype device id (e.g. `esp32-01`)
+- `DEVICE_SECRET` — device secret header value used by prototype devices
+- `USE_PRISMA` / `DATABASE_URL` — optional if using Prisma DB
 
+**Important endpoints**
+- `POST /api/auth/signup` — create user (body: `email`, `password`, `firstName`, `lastName`)
+- `POST /api/auth/signin` — login (body: `email`/`username`, `password`). Response may include a `firebaseToken` (custom token) — client should exchange it using Firebase client SDK via `signInWithCustomToken` to obtain an ID token.
+- `GET /api/users/me` — protected; returns the signed-in user's profile (requires `Authorization: Bearer <ID_TOKEN>` header)
+- `POST /api/readings/:deviceId` — device ingestion. For prototype devices send header `x-device-secret: <DEVICE_SECRET>` and JSON body `{ ts: <ms>, temperature, humidity, meta }`.
+
+**Device ingestion notes**
+- `ts` must be a numeric timestamp (milliseconds since epoch). The server also accepts batch posts with `readings: [ ... ]`.
+- Device ingestion uses `x-device-secret` (prototype). Later you may switch to per-device secrets or Firebase-based device auth.
+
+**How to test auth and profile fetch (example using HTTPie)**
+1. Signup (server creates Firebase account and profile):
+```powershell
+http POST http://localhost:4000/api/auth/signup email=user@example.com password=Pass123 firstName=Jane lastName=Doe
 ```
-env-monitor-backend
-├── src
-│   ├── app.ts                  # Entry point of the application
-│   ├── config
-│   │   └── index.ts            # Configuration settings
-│   ├── controllers
-│   │   ├── auth.controller.ts   # Authentication logic
-│   │   └── readings.controller.ts # Sensor data logic
-│   ├── middlewares
-│   │   └── auth.middleware.ts    # Authentication middleware
-│   ├── routes
-│   │   ├── auth.routes.ts        # Authentication routes
-│   │   └── readings.routes.ts     # Sensor data routes
-│   ├── services
-│   │   ├── alert.service.ts       # Alerting logic
-│   │   ├── auth.service.ts        # User authentication logic
-│   │   └── sensor.service.ts      # Sensor interaction logic
-│   ├── sensors
-│   │   └── sht30.ts              # SHT30 sensor functions
-│   ├── database
-│   │   └── prisma.ts             # Database interactions
-│   └── utils
-│       └── logger.ts             # Logging utilities
-├── prisma
-│   └── schema.prisma             # Database schema
-├── tests
-│   ├── auth.spec.ts              # Authentication tests
-│   └── readings.spec.ts          # Readings tests
-├── package.json                   # NPM configuration
-├── tsconfig.json                  # TypeScript configuration
-└── README.md                      # Project documentation
+2. Exchange credentials for an ID token using Firebase REST API (replace `YOUR_WEB_API_KEY`):
+```powershell
+http POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=YOUR_WEB_API_KEY" \
+  email=user@example.com password=Pass123 returnSecureToken:=true
+```
+3. Use the returned `idToken` to call profile endpoint:
+```powershell
+http GET http://localhost:4000/api/users/me Authorization:"Bearer <ID_TOKEN>"
 ```
 
-## Setup Instructions
+**How to test device ingest (HTTPie)**
+```powershell
+http --json POST http://localhost:4000/api/readings/esp32-01 \
+  x-device-secret:dev-device-secret-please-change ts:=1670000000000 temperature:=24 humidity:=47 meta:='{"battery":95}'
+```
 
-1. **Clone the repository**:
-   ```
-   git clone <repository-url>
-   cd env-monitor-backend
-   ```
+**Security & rules**
+- RTDB security rules should enforce `auth != null && auth.uid === $uid` if clients will read `users/{uid}` directly. The backend uses the Admin SDK and bypasses RTDB rules for server-side writes.
 
-2. **Install dependencies**:
-   ```
-   npm install
-   ```
+If you want a frontend example for displaying `firstName` in a welcome widget or to add a POST fallback for `/api/users/me`, tell me and I will add it.
 
-3. **Configure environment variables**: Create a `.env` file in the root directory and set the necessary environment variables.
+---
+Contributions welcome — open an issue or PR.
 
-4. **Run the application**:
-   ```
-   npm start
-   ```
-
-5. **Access the API**: The application will be available at `http://localhost:3000`.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request for any enhancements or bug fixes.
-
-## License
-
-This project is licensed under the MIT License.
+MIT License

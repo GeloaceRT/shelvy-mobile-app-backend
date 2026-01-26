@@ -9,15 +9,15 @@ export class AlertService {
 
     public checkAndAlert(humidity: number, temperature: number): void {
         if (humidity > this.criticalHumidityThreshold) {
-            this.sendAlert(`Critical humidity level reached: ${humidity}%`);
+            this.sendAlert(`Humidity level critical: ${humidity}%`);
         }
 
         if (temperature > this.criticalTemperatureThreshold) {
-            this.sendAlert(`Critical temperature level reached: ${temperature}°C`);
+            this.sendAlert(`Temperature level critical: ${temperature}°C`);
         }
     }
 
-    private sendAlert(message: string): void {
+    public sendAlert(message: string): void {
         // Logic to send alert to users (e.g., email, SMS, push notification)
         console.log(`Alert: ${message}`);
     }

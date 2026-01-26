@@ -1,4 +1,4 @@
-const dotenv = require('dotenv');
+import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import admin from 'firebase-admin';
@@ -29,7 +29,7 @@ const auth = admin.auth();
 const rdb = admin.database();
 
 function usage() {
-  console.log('Usage: npx tsx scripts/create-firebase-user.ts --email user@example.com --password Pass123');
+  console.log('Usage: npx tsx scripts/create-firebase-user.ts --email user@example.com --password Pass123 [--firstName Jane --lastName Doe]');
 }
 
 function parseArgs() {
@@ -39,31 +39,34 @@ function parseArgs() {
     const a = args[i];
     if (a === '--email') out.email = args[++i];
     else if (a === '--password') out.password = args[++i];
+    else if (a === '--firstName') out.firstName = args[++i];
+    else if (a === '--lastName') out.lastName = args[++i];
   }
   return out;
 }
 
 async function main() {
-  const { email, password } = parseArgs();
+  const { email, password, firstName, lastName } = parseArgs();
   if (!email || !password) {
     usage();
     process.exit(1);
   }
 
-  try {
-    const userRecord = await auth.createUser({ email, password });
-    console.log('Created Firebase user:', userRecord.uid);
     try {
-      await rdb.ref(`users/${userRecord.uid}`).set({ email, createdAt: Date.now(), source: 'script' });
-      console.log('Wrote profile to Realtime DB under /users/' + userRecord.uid);
-    } catch (e) {
-      console.warn('Failed writing to RTDB:', (e as any)?.message ?? e);
+      const userRecord = await auth.createUser({ email, password });
+      console.log('Created Firebase user:', userRecord.uid);
+      try {
+        const createdAt = new Date().toISOString().slice(0, 10);
+        await rdb.ref(`users/${userRecord.uid}`).set({ email, firstName, lastName, createdAt, source: 'script' });
+        console.log('Wrote profile to Realtime DB under /users/' + userRecord.uid);
+      } catch (e) {
+        console.warn('Failed writing to RTDB:', (e as any)?.message ?? e);
+      }
+      process.exit(0);
+    } catch (err: any) {
+      console.error('Failed to create Firebase user:', err && err.message ? err.message : err);
+      process.exit(1);
     }
-    process.exit(0);
-  } catch (err: any) {
-    console.error('Failed to create Firebase user:', err && err.message ? err.message : err);
-    process.exit(1);
-  }
 }
 
 main();

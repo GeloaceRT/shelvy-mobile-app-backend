@@ -1,11 +1,11 @@
 import request from 'supertest';
 import app from '../src/app';
-import { AuthService } from '../src/services/auth.service';
+import authService from '../src/services/auth.service';
 
 jest.mock('../src/services/auth.service');
 
 describe('AuthController', () => {
-    const authService = new AuthService();
+    const mockedService = authService as any;
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -16,7 +16,7 @@ describe('AuthController', () => {
             const userData = { username: 'testuser', password: 'password' };
             const mockResponse = { id: 1, username: 'testuser', token: 'fake-token' };
 
-            (authService.loginUser as jest.Mock).mockResolvedValue(mockResponse);
+            (mockedService.loginUser as jest.Mock).mockResolvedValue(mockResponse);
 
             const response = await request(app).post('/login').send(userData);
 
@@ -27,7 +27,7 @@ describe('AuthController', () => {
         it('should return 401 on failed login', async () => {
             const userData = { username: 'testuser', password: 'wrongpassword' };
 
-            (authService.loginUser as jest.Mock).mockRejectedValue(new Error('Invalid credentials'));
+            (mockedService.loginUser as jest.Mock).mockRejectedValue(new Error('Invalid credentials'));
 
             const response = await request(app).post('/login').send(userData);
 
@@ -38,7 +38,7 @@ describe('AuthController', () => {
 
     describe('POST /logout', () => {
         it('should return 200 on successful logout', async () => {
-            (authService.logoutUser as jest.Mock).mockResolvedValue();
+            (mockedService.logoutUser as jest.Mock).mockResolvedValue(undefined);
 
             const response = await request(app).post('/logout');
 

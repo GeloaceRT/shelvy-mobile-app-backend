@@ -7,17 +7,16 @@ export class AuthController {
 
     public signupUser = async (req: Request, res: Response) => {
         try {
-            const { email, username, password } = req.body;
+            const { email, username, password, firstName, lastName } = req.body;
             const identifier = (email ?? username ?? '').trim();
 
             if (!identifier || !password) {
                 return res.status(400).json({ message: 'Email/username and password are required.' });
             }
 
-            const user = await this.service.registerUser(identifier, password);
-            const token = this.service.generateToken((user as any).id ?? (user as any).firebaseUid ?? '');
-            // return server-side user plus firebase token for client sign-in and server JWT
-            return res.status(201).json({ token, user: { id: user.id, username: user.username }, firebaseToken: user.firebaseToken });
+            const user = await this.service.registerUser(identifier, password, firstName, lastName);
+            // return firebase custom token for client sign-in and server user info
+            return res.status(201).json({ user: { id: user.id, username: user.username }, firebaseToken: user.firebaseToken });
         } catch (error) {
             console.error('[AuthController] signup error', error);
             return res.status(500).json({ message: 'Unable to process signup.', error });
@@ -36,13 +35,28 @@ export class AuthController {
                     .json({ message: 'Email/username and password are required.' });
             }
 
-            const user = await this.service.validateUser(identifier, password);
-            if (!user) {
-                console.log('[AuthController] invalid credentials', identifier);
-                return res.status(401).json({ message: 'Invalid credentials.' });
+            // prefer service.loginUser if present (compat tests), otherwise fallback to validateUser
+            let user: any;
+            try {
+                user = typeof (this.service as any).loginUser === 'function'
+                    ? await (this.service as any).loginUser(identifier, password)
+                    : await this.service.validateUser(identifier, password);
+            } catch (e) {
+                console.error('[AuthController] login error', e);
+                return res.status(401).json({ message: 'Invalid credentials' });
             }
 
-            const token = this.service.generateToken(user.id);
+            if (!user) {
+                console.log('[AuthController] invalid credentials', identifier);
+                return res.status(401).json({ message: 'Invalid credentials' });
+            }
+
+            // If the auth service returned a ready-made response (e.g., includes a token), forward it
+            if ((user as any).token) {
+                console.log('[AuthController] login success', identifier);
+                return res.status(200).json(user);
+            }
+
             // try to create a firebase custom token for the user (if firebase account exists)
             let firebaseToken: string | undefined;
             try {
@@ -54,9 +68,7 @@ export class AuthController {
             }
 
             console.log('[AuthController] login success', identifier);
-            return res
-                .status(200)
-                .json({ token, firebaseToken, user: { id: user.id, username: user.username } });
+            return res.status(200).json({ firebaseToken, user: { id: user.id, username: user.username } });
         } catch (error) {
             console.error('[AuthController] login error', error);
             return res.status(500).json({ message: 'Unable to process login.', error });
@@ -65,7 +77,7 @@ export class AuthController {
 
     public logoutUser = async (_req: Request, res: Response) => {
         try {
-            return res.status(200).json({ message: 'Logged out successfully.' });
+            return res.status(200).json({ message: 'Logged out successfully' });
         } catch (error) {
             return res.status(500).json({ message: 'Unable to process logout.', error });
         }

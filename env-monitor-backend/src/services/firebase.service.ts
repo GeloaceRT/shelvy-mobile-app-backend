@@ -2,7 +2,7 @@ import { realtimeDb, firebaseAdmin, isFirebaseInitialized } from '../config/fire
 import { UserProfile, SensorReading } from '../models/firebaseSchema';
 
 const usersPath = (uid: string) => `users/${uid}`;
-const readingsPath = (sensorId: string) => `readings/${sensorId}`;
+const readingsPath = (deviceId: string) => `readings/${deviceId}`;
 
 export async function writeUserProfile(uid: string, profile: UserProfile): Promise<void> {
   if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
@@ -17,14 +17,49 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 
 export async function pushReading(reading: SensorReading): Promise<string> {
   if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
-  const node = realtimeDb.ref(readingsPath(reading.sensorId)).push();
-  await node.set(reading);
+  // legacy single-sensor helper (uses sensorId as deviceId)
+  const deviceId = (reading as any).deviceId ?? reading.sensorId ?? 'unknown';
+  const node = realtimeDb!.ref(readingsPath(deviceId)).push();
+  const date = new Date(Number(reading.ts) || Date.now()).toISOString().slice(0, 10).replace(/-/g, '/');
+  const payload = { ...reading, deviceId, date } as any;
+  await node.set(payload);
   return node.key as string;
+}
+
+export async function pushDeviceReading(deviceId: string, reading: SensorReading): Promise<string> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const node = realtimeDb!.ref(readingsPath(deviceId)).push();
+  const date = new Date(Number(reading.ts) || Date.now()).toISOString().slice(0, 10).replace(/-/g, '/');
+  const payload = { ...reading, deviceId, date } as any;
+  await node.set(payload);
+  // update summary
+  await realtimeDb.ref(`readings-summary/${deviceId}/latest`).set(payload);
+  await realtimeDb.ref(`readings-summary/${deviceId}/lastTs`).set(reading.ts);
+  return node.key as string;
+}
+
+export async function pushDeviceReadingsBatch(deviceId: string, readings: SensorReading[]): Promise<string[]> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const updates: Record<string, any> = {};
+  readings.forEach((r) => {
+    const newKey = realtimeDb!.ref(readingsPath(deviceId)).push().key as string;
+    const date = new Date(Number(r.ts) || Date.now()).toISOString().slice(0, 10).replace(/-/g, '/');
+    updates[`${readingsPath(deviceId)}/${newKey}`] = { ...r, deviceId, date };
+  });
+  // find latest reading by ts
+  const last = readings.reduce((a, b) => (a.ts >= b.ts ? a : b), readings[0]);
+  const lastDate = new Date(Number(last.ts) || Date.now()).toISOString().slice(0, 10).replace(/-/g, '/');
+  updates[`readings-summary/${deviceId}/latest`] = { ...last, deviceId, date: lastDate };
+  updates[`readings-summary/${deviceId}/lastTs`] = last.ts;
+  await realtimeDb!.ref().update(updates);
+  return Object.keys(updates)
+    .filter((k) => k.startsWith(`${readingsPath(deviceId)}/`))
+    .map((k) => k.split('/').pop() as string);
 }
 
 export async function listReadings(sensorId: string, limit = 50): Promise<SensorReading[]> {
   if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
-  const snap = await realtimeDb.ref(readingsPath(sensorId)).orderByChild('ts').limitToLast(limit).once('value');
+  const snap = await realtimeDb!.ref(readingsPath(sensorId)).orderByChild('ts').limitToLast(limit).once('value');
   const val = snap.val();
   if (!val) return [];
   return Object.keys(val).map((k) => val[k] as SensorReading).sort((a, b) => a.ts - b.ts);
@@ -51,6 +86,8 @@ export default {
   writeUserProfile,
   getUserProfile,
   pushReading,
+  pushDeviceReading,
+  pushDeviceReadingsBatch,
   listReadings,
   createFirebaseAccount,
 };
