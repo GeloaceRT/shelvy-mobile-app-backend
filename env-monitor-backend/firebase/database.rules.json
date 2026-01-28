@@ -11,6 +11,14 @@
       }
     },
 
+    "alerts": {
+      "$deviceId": {
+        ".indexOn": ["ts"],
+        ".read": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()"
+      }
+    },
+
     "readings-summary": {
       "$deviceId": {
         ".read": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()",

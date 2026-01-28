@@ -29,6 +29,7 @@ const config = {
       temperature: Number(process.env.ALERT_TEMP_THRESHOLD) || 30,
       humidity: Number(process.env.ALERT_HUMIDITY_THRESHOLD) || 70,
     },
+    testMode: process.env.ALERT_TEST_MODE === 'true',
   },
   serial: {
     port: process.env.ESP32_SERIAL_PORT?.trim() || '',

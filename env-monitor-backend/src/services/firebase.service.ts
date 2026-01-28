@@ -3,6 +3,7 @@ import { UserProfile, SensorReading } from '../models/firebaseSchema';
 
 const usersPath = (uid: string) => `users/${uid}`;
 const readingsPath = (deviceId: string) => `readings/${deviceId}`;
+const alertsPath = (deviceId: string) => `alerts/${deviceId}`;
 
 export async function writeUserProfile(uid: string, profile: UserProfile): Promise<void> {
   if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
@@ -57,12 +58,67 @@ export async function pushDeviceReadingsBatch(deviceId: string, readings: Sensor
     .map((k) => k.split('/').pop() as string);
 }
 
-export async function listReadings(sensorId: string, limit = 50): Promise<SensorReading[]> {
+export async function listReadings(
+  sensorId: string,
+  limit = 50,
+  fromTs?: number,
+  toTs?: number
+): Promise<SensorReading[]> {
   if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
-  const snap = await realtimeDb!.ref(readingsPath(sensorId)).orderByChild('ts').limitToLast(limit).once('value');
+  let query = realtimeDb!.ref(readingsPath(sensorId)).orderByChild('ts');
+  if (typeof fromTs === 'number') query = query.startAt(fromTs);
+  if (typeof toTs === 'number') query = query.endAt(toTs);
+  if (limit) query = query.limitToLast(limit);
+  const snap = await query.once('value');
   const val = snap.val();
   if (!val) return [];
-  return Object.keys(val).map((k) => val[k] as SensorReading).sort((a, b) => a.ts - b.ts);
+  return Object.keys(val)
+    .map((k) => val[k] as SensorReading)
+    .sort((a, b) => a.ts - b.ts);
+}
+
+export type AlertRecord = {
+  ts: number;
+  title: string;
+  value?: string;
+  severity?: 'info' | 'warning' | 'error' | string;
+  deviceId?: string;
+  date?: string;
+};
+
+export async function pushAlert(deviceId: string, alert: AlertRecord): Promise<string> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const node = realtimeDb.ref(alertsPath(deviceId)).push();
+  const date = new Date(Number(alert.ts) || Date.now()).toISOString().slice(0, 10).replace(/-/g, '/');
+  const payload = { ...alert, deviceId, date } as any;
+  await node.set(payload);
+  return node.key as string;
+}
+
+export async function listAlerts(
+  deviceId: string,
+  limit = 50,
+  fromTs?: number,
+  toTs?: number
+): Promise<AlertRecord[]> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  let query = realtimeDb.ref(alertsPath(deviceId)).orderByChild('ts');
+  if (typeof fromTs === 'number') query = query.startAt(fromTs);
+  if (typeof toTs === 'number') query = query.endAt(toTs);
+  if (limit) query = query.limitToLast(limit);
+  const snap = await query.once('value');
+  const val = snap.val();
+  if (!val) return [];
+  return Object.keys(val)
+    .map((k) => val[k] as AlertRecord)
+    .sort((a, b) => a.ts - b.ts);
+}
+
+export async function getLatestReading(deviceId: string): Promise<SensorReading | null> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  // read the summary node which is maintained on ingest
+  const snap = await realtimeDb!.ref(`readings-summary/${deviceId}/latest`).once('value');
+  return snap.exists() ? (snap.val() as SensorReading) : null;
 }
 
 export async function createFirebaseAccount(email: string, password: string): Promise<{ uid?: string; token?: string }>{
@@ -89,5 +145,8 @@ export default {
   pushDeviceReading,
   pushDeviceReadingsBatch,
   listReadings,
+  getLatestReading,
+  pushAlert,
+  listAlerts,
   createFirebaseAccount,
 };

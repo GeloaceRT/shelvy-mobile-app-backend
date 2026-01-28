@@ -4,6 +4,7 @@ import cors from 'cors';
 import authRoutes from './routes/auth.routes';
 import { AuthController } from './controllers/auth.controller';
 import readingsRoutes from './routes/readings.routes';
+import configRoutes from './routes/config.routes';
 import './config/firebase';
 import config from './config';
 import { logInfo } from './utils/logger';
@@ -33,6 +34,7 @@ app.use('/api/users', usersRoutes);
 // Mount readings router so it can receive a deviceId param at the root.
 // Example: POST /api/readings/:deviceId  -> handled by readingsRoutes with mergeParams
 app.use('/api/readings/:deviceId', readingsRoutes);
+app.use('/api/config', configRoutes);
 
 app.get('/api/health', (_req, res) => {
     res.status(200).json({ status: 'ok' });

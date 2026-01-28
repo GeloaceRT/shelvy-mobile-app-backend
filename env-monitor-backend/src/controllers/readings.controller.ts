@@ -22,16 +22,19 @@ export class ReadingsController {
     public alertCriticalLevels = async (_req?: Request, res?: Response): Promise<any> => {
         try {
             const { humidity, temperature } = await this.service.readSensorData();
-            // trigger alert notifications on thresholds
+            // trigger alert notifications on thresholds (or always in test mode)
             const tempThreshold = config.alert.threshold.temperature;
             const humidityThreshold = config.alert.threshold.humidity;
-            if (humidity > humidityThreshold) {
+            const force = config.alert.testMode;
+
+            if (force || humidity > humidityThreshold) {
                 this.alertService.sendAlert(`Humidity level critical: ${humidity}%`);
             }
-            if (temperature > tempThreshold) {
+            if (force || temperature > tempThreshold) {
                 this.alertService.sendAlert(`Temperature level critical: ${temperature}°C`);
             }
-            const alerts = this.evaluateAlerts({ humidity, temperature, capturedAt: new Date() });
+
+            const alerts = this.evaluateAlerts({ humidity, temperature, capturedAt: new Date(), force });
             if (!res) return alerts;
             return res.status(200).json({ alerts });
         } catch (error) {
@@ -41,10 +44,16 @@ export class ReadingsController {
         }
     };
 
-    private evaluateAlerts(data: SensorData): string[] {
+    private evaluateAlerts(data: SensorData & { force?: boolean }): string[] {
         const alerts: string[] = [];
         const tempThreshold = config.alert.threshold.temperature;
         const humidityThreshold = config.alert.threshold.humidity;
+
+        if (data.force) {
+            alerts.push('Humidity is critically high.');
+            alerts.push('Temperature is critically high.');
+            return alerts;
+        }
 
         if (data.humidity < humidityThreshold * 0.5) {
             alerts.push('Humidity is critically low.');
