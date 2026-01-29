@@ -94,31 +94,21 @@ router.get('/', (req: Request, res: Response) => {
 	return readingsController.getReadings(req, res);
 });
 
-// Get alerts evaluated from current sensor values for a device AND persist them to RTDB
+// Get alerts evaluated from the latest stored reading for a device (no persistence to avoid duplicates)
 router.get('/alerts', async (req: Request, res: Response) => {
 	const { deviceId } = req.params;
 	try {
-		// Call without res to get the raw alerts array
-		const alerts = (await readingsController.alertCriticalLevels(req)) as any;
-		const list = Array.isArray(alerts?.alerts) ? alerts.alerts : Array.isArray(alerts) ? alerts : [];
-		if (list.length) {
-			const now = Date.now();
-			for (const alertTitle of list) {
-				const record = {
-					ts: now,
-					title: alertTitle,
-					value: '',
-					severity: /critical|high|low/i.test(alertTitle) ? 'warning' : 'info',
-					deviceId,
-				};
-				try {
-					await pushAlert(deviceId, record as any);
-				} catch (err) {
-					console.warn('[readings.routes] failed to persist alert', (err as any)?.message ?? err);
-				}
-			}
-		}
-		return res.status(200).json({ alerts: list });
+		const latest = await firebaseService.getLatestReading(deviceId as string);
+		if (!latest) return res.status(404).json({ message: 'No reading found' });
+
+		const reading: BasicReading = {
+			ts: Number(latest.ts) || Date.now(),
+			temperature: Number((latest as any).temperature),
+			humidity: Number((latest as any).humidity),
+		};
+
+		const alerts = buildAlertsForReading(reading, deviceId);
+		return res.status(200).json({ alerts });
 	} catch (e) {
 		console.error('[readings.routes] GET alerts failed', (e as any)?.message ?? e);
 		return res.status(500).json({ message: 'Failed to evaluate alerts' });
