@@ -1,4 +1,5 @@
 import { realtimeDb, firebaseAdmin, isFirebaseInitialized } from '../config/firebase';
+import config from '../config';
 import { UserProfile, SensorReading } from '../models/firebaseSchema';
 
 const usersPath = (uid: string) => `users/${uid}`;
@@ -36,6 +37,12 @@ export async function pushDeviceReading(deviceId: string, reading: SensorReading
   // update summary
   await realtimeDb.ref(`readings-summary/${deviceId}/latest`).set(payload);
   await realtimeDb.ref(`readings-summary/${deviceId}/lastTs`).set(reading.ts);
+  // ensure control node exists for device so ESP32 can read flags
+  try {
+    await ensureDeviceControl(deviceId);
+  } catch (e) {
+    console.warn('[firebase.service] ensureDeviceControl failed', (e as any)?.message ?? e);
+  }
   return node.key as string;
 }
 
@@ -53,6 +60,12 @@ export async function pushDeviceReadingsBatch(deviceId: string, readings: Sensor
   updates[`readings-summary/${deviceId}/latest`] = { ...last, deviceId, date: lastDate };
   updates[`readings-summary/${deviceId}/lastTs`] = last.ts;
   await realtimeDb!.ref().update(updates);
+  // ensure control node exists for device
+  try {
+    await ensureDeviceControl(deviceId);
+  } catch (e) {
+    console.warn('[firebase.service] ensureDeviceControl failed', (e as any)?.message ?? e);
+  }
   return Object.keys(updates)
     .filter((k) => k.startsWith(`${readingsPath(deviceId)}/`))
     .map((k) => k.split('/').pop() as string);
@@ -121,6 +134,45 @@ export async function getLatestReading(deviceId: string): Promise<SensorReading 
   return snap.exists() ? (snap.val() as SensorReading) : null;
 }
 
+// Device control helpers (RTDB)
+const controlPath = (deviceId: string) => `devices/${deviceId}/control`;
+
+export async function setDeviceControl(deviceId: string, control: Record<string, any>): Promise<void> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  await realtimeDb!.ref(controlPath(deviceId)).update(control);
+}
+
+export async function getDeviceControl(deviceId: string): Promise<Record<string, any> | null> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const snap = await realtimeDb!.ref(controlPath(deviceId)).once('value');
+  return snap.exists() ? (snap.val() as Record<string, any>) : null;
+}
+
+export async function ensureDeviceControl(deviceId: string, defaults: Record<string, any> = {}): Promise<Record<string, any>> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const ref = realtimeDb!.ref(controlPath(deviceId));
+  const snap = await ref.once('value');
+  if (snap.exists()) return snap.val() as Record<string, any>;
+  const defaultControl: Record<string, any> = {
+    relay: false,
+    threshold: config.alert.threshold.temperature,
+    auto: false,
+    autoTs: null,
+    ...defaults,
+  };
+  await ref.set(defaultControl);
+  return defaultControl;
+}
+
+// For single-device prototype: ensure a root-level relay flag exists (e.g., /relay)
+export async function ensureRootRelayFlag(flagKey = 'relay'): Promise<void> {
+  if (!isFirebaseInitialized || !realtimeDb) throw new Error('Firebase not initialized');
+  const ref = realtimeDb!.ref(`/${flagKey}`);
+  const snap = await ref.once('value');
+  if (snap.exists()) return;
+  await ref.set(false);
+}
+
 export async function createFirebaseAccount(email: string, password: string): Promise<{ uid?: string; token?: string }>{
   if (!isFirebaseInitialized || !firebaseAdmin) throw new Error('Firebase not initialized');
   try {
@@ -149,4 +201,8 @@ export default {
   pushAlert,
   listAlerts,
   createFirebaseAccount,
+  setDeviceControl,
+  getDeviceControl,
+  ensureDeviceControl,
+  ensureRootRelayFlag,
 };

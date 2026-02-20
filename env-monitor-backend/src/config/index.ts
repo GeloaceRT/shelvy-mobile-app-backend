@@ -26,7 +26,7 @@ const config = {
   },
   alert: {
     threshold: {
-      temperature: Number(process.env.ALERT_TEMP_THRESHOLD) || 30,
+      temperature: Number(process.env.ALERT_TEMP_THRESHOLD) || 25,
       humidity: Number(process.env.ALERT_HUMIDITY_THRESHOLD) || 70,
     },
     testMode: process.env.ALERT_TEST_MODE === 'true',

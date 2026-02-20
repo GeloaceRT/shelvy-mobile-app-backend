@@ -18,20 +18,42 @@ const buildAlertsForReading = (reading: BasicReading, deviceId: string) => {
 	const ts = Number(reading.ts) || Date.now();
 	const tempThreshold = config.alert.threshold.temperature;
 	const humidityThreshold = config.alert.threshold.humidity;
+	const tempCriticalLow = tempThreshold * 0.5;
+	const humidityCriticalLow = humidityThreshold * 0.5;
 
-	if (reading.humidity < humidityThreshold * 0.5) {
+	if (reading.humidity < humidityCriticalLow) {
 		alerts.push({ ts, title: 'Humidity is critically low.', value: `${reading.humidity}%`, severity: 'error', deviceId });
 	} else if (reading.humidity > humidityThreshold) {
 		alerts.push({ ts, title: 'Humidity is critically high.', value: `${reading.humidity}%`, severity: 'warning', deviceId });
 	}
 
-	if (reading.temperature < tempThreshold * 0.5) {
+	if (reading.temperature < tempCriticalLow) {
 		alerts.push({ ts, title: 'Temperature is critically low.', value: `${reading.temperature}°C`, severity: 'error', deviceId });
 	} else if (reading.temperature > tempThreshold) {
 		alerts.push({ ts, title: 'Temperature is critically high.', value: `${reading.temperature}°C`, severity: 'warning', deviceId });
 	}
 
 	return alerts;
+};
+
+// Decide the relay flag for the ESP32 control system based on critical thresholds
+const buildControlForReading = (reading: BasicReading) => {
+	const tempThreshold = config.alert.threshold.temperature;
+	const humidityThreshold = config.alert.threshold.humidity;
+	const tempCriticalLow = tempThreshold * 0.5;
+	const humidityCriticalLow = humidityThreshold * 0.5;
+
+	const isCriticalHigh = reading.temperature > tempThreshold || reading.humidity > humidityThreshold;
+	const isCriticalLow = reading.temperature < tempCriticalLow || reading.humidity < humidityCriticalLow;
+	const relay = isCriticalHigh || isCriticalLow;
+	const reason = isCriticalHigh ? 'critical-high' : isCriticalLow ? 'critical-low' : 'within-threshold';
+
+	return {
+		relay,
+		auto: true,
+		autoTs: Date.now(),
+		controlReason: reason,
+	};
 };
 
 // Ingest a single reading for a device (device-authenticated)
@@ -56,11 +78,37 @@ router.post('/', async (req: Request, res: Response) => {
 			const parsed = readings.map((r) => ({ ...r, ts: Number(r.ts) }));
 			const keys = await firebaseService.pushDeviceReadingsBatch(deviceId, parsed as any);
 
-			// write alerts for each reading in the batch
+			// write alerts for each reading in the batch and check thresholds
+			let shouldEnableRelay = false;
+			let shouldDisableRelay = false;
+			let criticalReading: BasicReading | null = null;
+			let lastReading: BasicReading | null = null;
 			for (const r of parsed) {
 				const alerts = buildAlertsForReading(r as BasicReading, deviceId);
 				for (const alert of alerts) {
 					await pushAlert(deviceId, alert as any);
+				}
+				const control = buildControlForReading(r as BasicReading);
+				if (control.relay) {
+					shouldEnableRelay = true;
+					shouldDisableRelay = false; // prioritize enabling when any critical reading appears
+					criticalReading = r as BasicReading;
+				} else if (!shouldEnableRelay) {
+					shouldDisableRelay = true;
+				}
+				lastReading = r as BasicReading;
+			}
+			// If any reading is critical, turn relay ON for ESP32; otherwise ensure it is turned OFF
+			const controlUpdate = shouldEnableRelay
+				? { ...buildControlForReading(criticalReading as BasicReading) }
+				: shouldDisableRelay && lastReading
+					? { ...buildControlForReading(lastReading), relay: false, controlReason: 'within-threshold' }
+					: null;
+			if (controlUpdate) {
+				try {
+					await firebaseService.setDeviceControl(deviceId, controlUpdate);
+				} catch (e) {
+					console.warn('[readings.routes] failed to set device control on threshold', (e as any)?.message ?? e);
 				}
 			}
 			return res.status(201).json({ created: keys.length });
@@ -71,10 +119,18 @@ router.post('/', async (req: Request, res: Response) => {
 		reading.ts = Number(reading.ts);
 		const key = await firebaseService.pushDeviceReading(deviceId, reading as any);
 
+
 		// write alerts for this reading
 		const alerts = buildAlertsForReading(reading as BasicReading, deviceId);
 		for (const alert of alerts) {
 			await pushAlert(deviceId, alert as any);
+		}
+		// Update control/relay flag in RTDB so ESP32 can toggle peltier/humidifier
+		try {
+			const controlUpdate = buildControlForReading(reading as BasicReading);
+			await firebaseService.setDeviceControl(deviceId, controlUpdate);
+		} catch (e) {
+			console.warn('[readings.routes] failed to set device control on threshold', (e as any)?.message ?? e);
 		}
 		return res.status(201).json({ key });
 	} catch (e) {
