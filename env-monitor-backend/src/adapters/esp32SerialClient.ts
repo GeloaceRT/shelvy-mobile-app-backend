@@ -179,8 +179,9 @@ export class Esp32SerialClient extends EventEmitter {
   }
 
   private parseTextReading(line: string): Esp32SerialReading | undefined {
-    const temperatureMatch = line.match(/temp(?:erature)?\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
-    const humidityMatch = line.match(/humidity\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+    // Support "Temp: 25.1" and "T=25.1C" style payloads
+    const temperatureMatch = line.match(/(?:temp(?:erature)?\s*[:=]|t=)\s*(-?\d+(?:\.\d+)?)/i);
+    const humidityMatch = line.match(/(?:humidity\s*[:=]|h=)\s*(\d+(?:\.\d+)?)/i);
 
     if (!temperatureMatch || !humidityMatch) {
       return undefined;
@@ -201,7 +202,8 @@ export class Esp32SerialClient extends EventEmitter {
   }
 
   private isNoiseLine(line: string): boolean {
-    return /voltage/i.test(line);
+    // ignore chatter like voltage lines or firmware info messages
+    return /voltage/i.test(line) || /reading sent/i.test(line) || /state=\d/i.test(line);
   }
 
   private parseCapturedAt(value: unknown): Date {
