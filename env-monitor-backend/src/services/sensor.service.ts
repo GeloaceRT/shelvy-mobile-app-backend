@@ -28,6 +28,11 @@ export class SensorService {
             return serialReading;
         }
 
+        // If a serial port is configured, do not fall back to mock data—surface an error instead
+        if (config.serial.port) {
+            throw new Error(`No serial data received from ${config.serial.port} within ${this.serialTimeout}ms`);
+        }
+
         const mockReading = await getHumidityTemperature();
         return this.processSensorData(mockReading);
     }
@@ -35,7 +40,17 @@ export class SensorService {
     processSensorData(data: SensorReading | Esp32SerialReading): SensorData {
         const { humidity, temperature } = data;
         const capturedAt = data.capturedAt instanceof Date ? data.capturedAt : new Date();
-        return { humidity, temperature, capturedAt };
+
+        if (!Number.isFinite(humidity) || !Number.isFinite(temperature)) {
+            throw new Error('Invalid sensor values received');
+        }
+
+        const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+        // Clamp to plausible SHT30 ranges to avoid garbage readings from noisy ADC/serial input during testing
+        const safeHumidity = clamp(humidity, 0, 100);
+        const safeTemperature = clamp(temperature, -40, 125);
+
+        return { humidity: safeHumidity, temperature: safeTemperature, capturedAt };
     }
 
     private createSerialClient(): Esp32SerialClient | undefined {
